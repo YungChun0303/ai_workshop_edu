@@ -1,0 +1,184 @@
+---
+title: "3100 — Neighborhood Change: Synthetic Control for ZIP 63106"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Estimate how ZIP 63106 changed after CNI began (2019) relative to a synthetic
+         63106 built from other St. Louis ZIPs, using the mock ACS ZIP panel. Inference
+         by in-space placebos (Fisher's exact p-value).
+Reads:   answer_key/data_clean/1100_zip_year.rds
+Writes:  answer_key/outputs/tables/3100_*.csv, answer_key/outputs/figures/3100_*.png
+Packages: here, tidyverse, knitr, tidysynth
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+library(tidysynth)
+set.seed(20261016)
+knitr::opts_chunk$set(fig.width = 9, fig.height = 4.5, dpi = 150)
+
+clean_dir <- here::here("answer_key", "data_clean")
+fig_dir   <- here::here("answer_key", "outputs", "figures")
+tab_dir   <- here::here("answer_key", "outputs", "tables")
+
+theme_workshop <- theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#e6e5e1", linewidth = 0.3),
+        axis.title = element_text(color = "#52514e"),
+        plot.title = element_text(face = "bold", color = "#0b0b0b"),
+        plot.subtitle = element_text(color = "#52514e"),
+        legend.position = "top", legend.title = element_blank())
+policy_line <- geom_vline(xintercept = 2018.5, linetype = "dashed", color = "#52514e", linewidth = 0.4)
+```
+
+## Research question and design
+
+**Did ZIP 63106 change after CNI began — in population, racial composition, and income — compared with what would have happened without it?**
+
+There is one treated neighborhood, so there is no comparison group of treated units to average over. Synthetic control builds a weighted average of untreated St. Louis ZIPs that tracks 63106 closely before 2019; the gap after 2019 is the estimated effect. Inference comes from placebo runs: pretend each donor ZIP was treated and ask how unusual 63106's gap is.
+
+## Donor pool
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+TREATED_ZIP <- "63106"
+LAST_PRE    <- 2018
+EXCLUDED    <- c("63101", "63103", "63107")   # neighbors of 63106; 63107 hosts a CNI school
+
+zip_year <- read_rds(file.path(clean_dir, "1100_zip_year.rds"))
+
+synth_data <- zip_year %>%
+  filter(!zip %in% EXCLUDED) %>%
+  select(zip, year, pop_total = acs_pop_total, pct_black = acs_pct_black,
+         median_income = acs_median_income) %>%
+  group_by(zip) %>%
+  filter(n() == n_distinct(zip_year$year), !anyNA(c(pop_total, pct_black, median_income))) %>%
+  ungroup()
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+tibble(units = n_distinct(synth_data$zip), donors = n_distinct(synth_data$zip) - 1,
+       years = paste(range(synth_data$year), collapse = "–"),
+       pre_period = paste0(min(synth_data$year), "–", LAST_PRE),
+       excluded = paste(EXCLUDED, collapse = ", ")) %>%
+  kable()
+```
+
+## A reusable synthetic control function
+
+Predictors are the pre-period means of the *other* two ACS measures plus the outcome itself in 2014, 2016, and 2018. Do not add a predictor that duplicates an outcome lag: it makes the weight problem singular.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+OUTCOMES <- c("pop_total", "pct_black", "median_income")
+
+run_synth_model <- function(data, outcome) {
+  others <- setdiff(OUTCOMES, outcome)
+  pre    <- min(data$year):LAST_PRE
+  s <- data %>%
+    synthetic_control(outcome = !!sym(outcome), unit = zip, time = year,
+                      i_unit = TREATED_ZIP, i_time = LAST_PRE, generate_placebos = TRUE) %>%
+    generate_predictor(time_window = pre,
+                       pred_a = mean(!!sym(others[1])),
+                       pred_b = mean(!!sym(others[2])))
+  for (yr in c(2014, 2016, 2018)) {
+    s <- s %>% generate_predictor(time_window = yr, !!paste0("lag_", yr) := !!sym(outcome))
+  }
+  s %>% generate_weights(optimization_window = pre) %>% generate_control()
+}
+
+summarise_synth <- function(s, outcome) {
+  path <- s %>% grab_synthetic_control() %>% mutate(gap = real_y - synth_y)
+  sig  <- s %>% grab_significance()
+  me   <- sig %>% filter(unit_name == TREATED_ZIP)
+  tibble(outcome    = outcome,
+         pre_rmspe  = sqrt(mean(path$gap[path$time_unit <= LAST_PRE]^2)),
+         mean_gap   = mean(path$gap[path$time_unit > LAST_PRE]),
+         gap_2023   = path$gap[path$time_unit == max(path$time_unit)],
+         pct_gap_2023 = gap_2023 / path$synth_y[path$time_unit == max(path$time_unit)],
+         rank       = me$rank,
+         units      = nrow(sig),
+         fisher_p   = me$fishers_exact_pvalue)
+}
+```
+
+## Results
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+fits <- set_names(map(OUTCOMES, ~ run_synth_model(synth_data, .x)), OUTCOMES)
+results <- imap_dfr(fits, summarise_synth) %>%
+  mutate(planted_change = recode(outcome,
+    pop_total     = "+10% per year from 2019 (+50% by 2023)",
+    pct_black     = "+3.5 pp per year from 2019 (+17.5 pp by 2023)",
+    median_income = "−4% per year from 2019 (−20% by 2023)"))
+write_csv(results, file.path(tab_dir, "3100_synth_results.csv"))
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+kable(results, digits = 3,
+      caption = "Synthetic control for ZIP 63106. Rank 1 = largest post/pre RMSPE ratio; the smallest possible p is 1/units.")
+```
+
+## Trends: ZIP 63106 vs. synthetic 63106
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+labels <- c(pop_total = "Population", pct_black = "Share Black", median_income = "Median household income ($)")
+paths <- imap_dfr(fits, ~ grab_synthetic_control(.x) %>% mutate(outcome = labels[.y])) %>%
+  pivot_longer(c(real_y, synth_y), names_to = "series", values_to = "value") %>%
+  mutate(series = recode(series, real_y = "ZIP 63106", synth_y = "Synthetic 63106"))
+write_csv(paths, file.path(tab_dir, "3100_synth_paths.csv"))
+
+p_trends <- ggplot(paths, aes(x = time_unit, y = value, color = series, linetype = series)) +
+  policy_line +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  scale_color_manual(values = c("ZIP 63106" = "#eb6834", "Synthetic 63106" = "#52514e")) +
+  scale_linetype_manual(values = c("ZIP 63106" = "solid", "Synthetic 63106" = "dashed")) +
+  scale_x_continuous(breaks = seq(2014, 2023, 3)) +
+  labs(title = "ZIP 63106 and its synthetic control",
+       subtitle = "Each panel has its own scale. Dashed vertical line: CNI begins (2019).",
+       x = NULL, y = NULL) +
+  theme_workshop
+ggsave(file.path(fig_dir, "3100_synth_trends.png"), p_trends, width = 10, height = 4.5, dpi = 150)
+p_trends
+```
+
+## Placebo gaps
+
+Each gray line is a donor ZIP treated as if it had received CNI. ZIP 63106's gap (orange) stands out only if the effect is real.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+placebo_gaps <- imap_dfr(fits, function(s, y) {
+  s %>% grab_synthetic_control(placebo = TRUE) %>%
+    mutate(gap = real_y - synth_y, outcome = labels[y],
+           unit = if_else(.placebo == 1, "Placebo ZIP", "ZIP 63106"))
+})
+write_csv(placebo_gaps, file.path(tab_dir, "3100_placebo_gaps.csv"))
+
+p_placebo <- ggplot(placebo_gaps, aes(x = time_unit, y = gap, group = .id)) +
+  policy_line +
+  geom_hline(yintercept = 0, color = "#b5b4b0", linewidth = 0.3) +
+  geom_line(data = ~ filter(.x, unit == "Placebo ZIP"), color = "#c9c8c3", linewidth = 0.4) +
+  geom_line(data = ~ filter(.x, unit == "ZIP 63106"), color = "#eb6834", linewidth = 1.1) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  scale_x_continuous(breaks = seq(2014, 2023, 3)) +
+  labs(title = "Gap between each ZIP and its synthetic control",
+       subtitle = "Orange: ZIP 63106. Gray: placebo runs for each donor ZIP.",
+       x = NULL, y = "Actual minus synthetic") +
+  theme_workshop
+ggsave(file.path(fig_dir, "3100_synth_placebos.png"), p_placebo, width = 10, height = 4.5, dpi = 150)
+p_placebo
+```
+
+## Which ZIPs make up synthetic 63106?
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+weights <- imap_dfr(fits, ~ grab_unit_weights(.x) %>% mutate(outcome = .y)) %>%
+  filter(weight >= 0.05) %>%
+  arrange(outcome, desc(weight))
+write_csv(weights, file.path(tab_dir, "3100_donor_weights.csv"))
+kable(weights, digits = 3, caption = "Donor ZIPs with weight of at least 0.05")
+```

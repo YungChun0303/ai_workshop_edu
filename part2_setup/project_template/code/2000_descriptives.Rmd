@@ -1,0 +1,42 @@
+---
+title: "2000 — Descriptive Statistics"
+author: "[Your Name]"
+date: "[YYYY-MM-DD]"
+output: html_document
+---
+
+<!--
+Purpose: Summarize the analysis sample and produce descriptive tables and figures.
+Reads:   data_clean/
+Writes:  outputs/tables/, outputs/figures/
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+set.seed(20261016)
+```
+
+## Load analysis file
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: read_rds(here::here("data_clean", "1000_analysis.rds"))
+```
+
+## Sample description
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: N by group and period; flag cells with fewer than 10 observations
+```
+
+## Descriptive tables
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: save to here::here("outputs", "tables", "2000_<name>.csv")
+```
+
+## Figures
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: ggsave(here::here("outputs", "figures", "2000_<name>.png"))
+```

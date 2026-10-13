@@ -1,0 +1,190 @@
+---
+title: "3000 — Student Outcomes: Staggered Difference-in-Differences (CSDID)"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Estimate the effect of entering a CNI school (or moving into ZIP 63106) on MAP
+         scores with Callaway & Sant'Anna (2021), compare with TWFE, show the raw-points
+         pitfall, and run placebo outcomes. Report each estimate next to the planted truth.
+Reads:   answer_key/data_clean/1000_student_year.rds
+Writes:  answer_key/outputs/tables/3000_*.csv, answer_key/outputs/figures/3000_*.png
+Packages: here, tidyverse, knitr, fixest, did
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+library(fixest)
+library(did)
+set.seed(20261016)
+knitr::opts_chunk$set(fig.width = 8, fig.height = 4.5, dpi = 150)
+
+clean_dir <- here::here("answer_key", "data_clean")
+fig_dir   <- here::here("answer_key", "outputs", "figures")
+tab_dir   <- here::here("answer_key", "outputs", "tables")
+
+theme_workshop <- theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#e6e5e1", linewidth = 0.3),
+        axis.title = element_text(color = "#52514e"),
+        plot.title = element_text(face = "bold", color = "#0b0b0b"),
+        plot.subtitle = element_text(color = "#52514e"),
+        legend.position = "top", legend.title = element_blank())
+```
+
+## Research question and design
+
+**Did students who entered a CNI school, or moved into ZIP 63106, score higher on MAP tests afterward?**
+
+Students enter treatment in different years (2019–2023), so a single before/after split does not exist. Callaway & Sant'Anna's estimator compares each entry cohort with students not yet treated in the same year, then averages those comparisons. Two-way fixed effects (TWFE) is shown as the familiar baseline.
+
+## Analysis sample
+
+MAP scores are standardized within grade × year, because raw scale scores grow 5–6 points a year with grade.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+panel <- read_rds(file.path(clean_dir, "1000_student_year.rds"))
+
+map <- panel %>%
+  filter(!is.na(map_ela) | !is.na(map_math)) %>%
+  group_by(grade, year) %>%
+  mutate(z_ela  = (map_ela  - mean(map_ela,  na.rm = TRUE)) / sd(map_ela,  na.rm = TRUE),
+         z_math = (map_math - mean(map_math, na.rm = TRUE)) / sd(map_math, na.rm = TRUE),
+         sd_ela = sd(map_ela, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(post_school = g_school > 0 & year >= g_school,
+         post_zip    = g_zip > 0 & year >= g_zip)
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+tibble(student_years = nrow(map), students = n_distinct(map$research_id),
+       school_cohort_students = n_distinct(map$research_id[map$g_school > 0]),
+       zip_cohort_students    = n_distinct(map$research_id[map$g_zip > 0])) %>%
+  kable(format.args = list(big.mark = ","))
+```
+
+## Benchmark: the effect built into the data
+
+The synthetic data add **+4 MAP points** for every year a student attends a CNI school and **+1.5 points** for every year a student lives in ZIP 63106, from 2019 on. Because cohorts are defined by first exposure (students stay in their cohort if they later leave), the effect a cohort actually experiences is the average exposure after entry. That average, in SD units, is the benchmark for CSDID.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+sd_map <- mean(map$sd_ela)
+benchmark <- bind_rows(
+  map %>% filter(post_school) %>% summarise(treatment = "CNI school", points = mean(4 * in_cni_school + 1.5 * in_cni_zip)),
+  map %>% filter(post_zip)    %>% summarise(treatment = "ZIP 63106",  points = mean(4 * in_cni_school + 1.5 * in_cni_zip))
+) %>% mutate(sd_units = points / sd_map)
+kable(benchmark, digits = 2)
+```
+
+## Baseline: two-way fixed effects
+
+Student and year fixed effects, both treatments in one model, standard errors clustered by student. With heterogeneous, staggered effects TWFE can be biased; here it serves as a familiar reference point.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+twfe <- feols(c(map_ela, map_math) ~ post_school + post_zip | research_id + year,
+              data = map, cluster = ~ research_id)
+twfe_tab <- as_tibble(coeftable(twfe)) %>%
+  transmute(outcome = recode(lhs, map_ela = "MAP ELA", map_math = "MAP Math"),
+            term = recode(coefficient, post_schoolTRUE = "CNI school", post_zipTRUE = "ZIP 63106"),
+            estimate_points = Estimate, se = `Std. Error`,
+            truth_points = if_else(term == "CNI school", 4, 1.5))
+write_csv(twfe_tab, file.path(tab_dir, "3000_twfe.csv"))
+kable(twfe_tab, digits = 2)
+```
+
+## Main model: Callaway & Sant'Anna
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+run_csdid <- function(data, outcome, cohort) {
+  att_gt(yname = outcome, tname = "year", idname = "research_id", gname = cohort,
+         data = as.data.frame(data), control_group = "notyettreated",
+         allow_unbalanced_panel = TRUE, cband = FALSE)
+}
+summarise_csdid <- function(gt, outcome, treatment) {
+  agg <- aggte(gt, type = "simple", na.rm = TRUE)
+  tibble(treatment = treatment, outcome = outcome, att = agg$overall.att, se = agg$overall.se)
+}
+
+specs <- expand_grid(outcome = c("z_ela", "z_math"),
+                     cohort  = c("g_school", "g_zip"))
+csdid_fits <- pmap(specs, function(outcome, cohort) run_csdid(map, outcome, cohort))
+csdid_tab <- pmap_dfr(list(csdid_fits, specs$outcome, specs$cohort), function(gt, outcome, cohort) {
+  summarise_csdid(gt, outcome, if_else(cohort == "g_school", "CNI school", "ZIP 63106"))
+}) %>%
+  left_join(benchmark %>% select(treatment, truth_sd = sd_units), by = "treatment") %>%
+  mutate(outcome = recode(outcome, z_ela = "MAP ELA (SD)", z_math = "MAP Math (SD)"),
+         ci_low = att - 1.96 * se, ci_high = att + 1.96 * se)
+write_csv(csdid_tab, file.path(tab_dir, "3000_csdid.csv"))
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+kable(csdid_tab, digits = 3, caption = "CSDID average effect (SD units) next to the planted truth")
+```
+
+## Event study
+
+Effects by years since entry. Pre-entry estimates near zero support the parallel-trends assumption; post-entry estimates show the effect.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+event <- map2_dfr(csdid_fits[specs$cohort == "g_school"], specs$outcome[specs$cohort == "g_school"],
+                  function(gt, outcome) {
+  es <- aggte(gt, type = "dynamic", min_e = -4, max_e = 4, na.rm = TRUE)
+  tibble(outcome = recode(outcome, z_ela = "MAP ELA", z_math = "MAP Math"),
+         event_time = es$egt, att = es$att.egt, se = es$se.egt)
+})
+write_csv(event, file.path(tab_dir, "3000_event_study_school.csv"))
+
+p_event <- ggplot(event, aes(x = event_time, y = att)) +
+  geom_hline(yintercept = 0, color = "#b5b4b0", linewidth = 0.3) +
+  geom_vline(xintercept = -0.5, linetype = "dashed", color = "#52514e", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = att - 1.96 * se, ymax = att + 1.96 * se),
+                width = 0.15, color = "#2a78d6", linewidth = 0.5) +
+  geom_point(size = 2.2, color = "#2a78d6") +
+  facet_wrap(~ outcome) +
+  scale_x_continuous(breaks = -4:4) +
+  labs(title = "Event study: entering a CNI school",
+       subtitle = "CSDID, not-yet-treated comparison group, 95% confidence intervals",
+       x = "Years since entering a CNI school", y = "Effect on MAP (SD units)") +
+  theme_workshop
+ggsave(file.path(fig_dir, "3000_event_study_school.png"), p_event, width = 9, height = 4.5, dpi = 150)
+p_event
+```
+
+## Pitfall: CSDID on raw MAP points
+
+**Teaching moment.** Run the same model on raw scale scores. With an unbalanced student panel, `att_gt()` falls back to comparing repeated cross-sections, so each cohort is compared with its own younger, lower-grade self — and normal grade-to-grade growth is counted as a treatment effect. Ask the room: is a 10-point effect plausible when a year of school is worth 5–6 points?
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+pitfall <- map_dfr(c("map_ela", "map_math"), function(y) {
+  summarise_csdid(run_csdid(map, y, "g_school"), y, "CNI school")
+}) %>%
+  left_join(benchmark %>% select(treatment, truth_points = points), by = "treatment") %>%
+  mutate(outcome = recode(outcome, map_ela = "MAP ELA (raw points)", map_math = "MAP Math (raw points)"))
+write_csv(pitfall, file.path(tab_dir, "3000_pitfall_raw_points.csv"))
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+kable(pitfall, digits = 2, caption = "CSDID on raw points: biased upward by grade growth")
+```
+
+## Placebo outcomes
+
+Attendance and suspension days were simulated with **no** treatment effect, so estimates should be near zero.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+placebo_specs <- expand_grid(outcome = c("attend_rate", "susp_days"), cohort = c("g_school", "g_zip"))
+placebo <- pmap_dfr(placebo_specs, function(outcome, cohort) {
+  d <- panel %>% filter(!is.na(.data[[outcome]]))
+  summarise_csdid(run_csdid(d, outcome, cohort), outcome,
+                  if_else(cohort == "g_school", "CNI school", "ZIP 63106"))
+}) %>% mutate(truth = 0)
+write_csv(placebo, file.path(tab_dir, "3000_placebo.csv"))
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+kable(placebo, digits = 3, caption = "Placebo outcomes (true effect = 0)")
+```

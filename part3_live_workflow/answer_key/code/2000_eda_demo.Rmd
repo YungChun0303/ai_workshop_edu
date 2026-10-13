@@ -1,0 +1,192 @@
+---
+title: "2000 — Descriptive Statistics and Exploratory Figures"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Describe the analysis sample, treatment timing, MAP trends by treatment
+         group, and how ZIP 63106 changed relative to other ZIPs.
+Reads:   answer_key/data_clean/1000_student_year.rds, answer_key/data_clean/1100_zip_year.rds
+Writes:  answer_key/outputs/tables/2000_*.csv, answer_key/outputs/figures/2000_*.png
+Packages: here, tidyverse, knitr
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+set.seed(20261016)
+knitr::opts_chunk$set(fig.width = 8, fig.height = 4.5, dpi = 150)
+
+clean_dir <- here::here("answer_key", "data_clean")
+fig_dir   <- here::here("answer_key", "outputs", "figures")
+tab_dir   <- here::here("answer_key", "outputs", "tables")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(tab_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Group colors: treated groups take categorical slots 1-2; the comparison group is a recessive gray.
+group_colors <- c("CNI-school cohort" = "#2a78d6",
+                  "ZIP 63106 cohort"  = "#eb6834",
+                  "Never treated"     = "#8a8985")
+theme_workshop <- theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#e6e5e1", linewidth = 0.3),
+        axis.title = element_text(color = "#52514e"),
+        plot.title = element_text(face = "bold", color = "#0b0b0b"),
+        plot.subtitle = element_text(color = "#52514e"),
+        legend.position = "top", legend.title = element_blank())
+policy_line <- geom_vline(xintercept = 2018.5, linetype = "dashed", color = "#52514e", linewidth = 0.4)
+```
+
+## Load data
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+panel    <- read_rds(file.path(clean_dir, "1000_student_year.rds"))
+zip_year <- read_rds(file.path(clean_dir, "1100_zip_year.rds"))
+
+# Mutually exclusive groups for description: a student in both cohorts is shown with the school cohort.
+panel <- panel %>%
+  mutate(group = case_when(g_school > 0 ~ "CNI-school cohort",
+                           g_zip > 0    ~ "ZIP 63106 cohort",
+                           TRUE         ~ "Never treated"),
+         group = factor(group, levels = names(group_colors)))
+```
+
+## Sample by year
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+sample_by_year <- panel %>%
+  group_by(year) %>%
+  summarise(student_years   = n(),
+            tested_map      = sum(!is.na(map_ela) | !is.na(map_math)),
+            in_cni_school   = sum(in_cni_school),
+            living_in_63106 = sum(in_cni_zip),
+            .groups = "drop")
+write_csv(sample_by_year, file.path(tab_dir, "2000_sample_by_year.csv"))
+sample_by_year %>% mutate(year = as.character(year)) %>% kable(format.args = list(big.mark = ","))
+```
+
+## Baseline characteristics (2014–2018)
+
+Students in the treated cohorts look different from other students *before* the intervention. That is expected: the intervention targets a low-income, mostly Black neighborhood. CSDID compares changes, not levels, so baseline differences are not a problem as long as trends would have been parallel.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+baseline <- panel %>%
+  filter(year < 2019) %>%
+  group_by(group) %>%
+  summarise(students     = n_distinct(research_id),
+            pct_black    = mean(black),
+            pct_hispanic = mean(hispanic),
+            pct_frl      = mean(frl),
+            pct_ell      = mean(ell),
+            pct_iep      = mean(iep),
+            pct_city     = mean(city),
+            map_ela      = mean(map_ela, na.rm = TRUE),
+            map_math     = mean(map_math, na.rm = TRUE),
+            attend_rate  = mean(attend_rate, na.rm = TRUE),
+            .groups = "drop")
+write_csv(baseline, file.path(tab_dir, "2000_baseline_characteristics.csv"))
+kable(baseline, digits = 2)
+```
+
+## Treatment timing
+
+Students enter treatment in different years: the staggered timing that Callaway & Sant'Anna's estimator is built for.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+timing <- panel %>%
+  distinct(research_id, g_school, g_zip) %>%
+  pivot_longer(c(g_school, g_zip), names_to = "treatment", values_to = "cohort") %>%
+  filter(cohort > 0) %>%
+  count(treatment, cohort, name = "students") %>%
+  mutate(treatment = recode(treatment, g_school = "CNI-school cohort", g_zip = "ZIP 63106 cohort"))
+write_csv(timing, file.path(tab_dir, "2000_treatment_timing.csv"))
+
+p_timing <- ggplot(timing, aes(x = factor(cohort), y = students, fill = treatment)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75, color = "white", linewidth = 0.5) +
+  geom_text(aes(label = students), position = position_dodge(width = 0.8), vjust = -0.4,
+            size = 3.2, color = "#52514e") +
+  scale_fill_manual(values = group_colors) +
+  labs(title = "Students entering treatment, by first year of exposure",
+       x = "Treatment cohort (first exposed year)", y = "Students") +
+  theme_workshop
+ggsave(file.path(fig_dir, "2000_treatment_timing.png"), p_timing, width = 8, height = 4.5, dpi = 150)
+p_timing
+```
+
+## MAP trends by group
+
+Raw MAP averages rise with grade, so they are standardized within grade × year before comparing groups (0 = the average student in that grade and year). Students in the CNI-school cohort move up relative to never-treated students after 2019.
+
+These are group means of *different students each year*: students enter and leave the panel, and the treated cohorts grow over time. Early years rest on few cohort students (most were too young to be tested), which is why 2014 jumps around. The chart is a picture, not an estimate — `3000_csdid_demo.Rmd` does the estimation. (The ZIP-63106-only group is left out here: its membership changes sharply as new families move in, so its yearly mean mostly reflects who arrived.)
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+map_trends <- panel %>%
+  filter(!is.na(map_ela) | !is.na(map_math)) %>%
+  group_by(grade, year) %>%
+  mutate(z_ela  = (map_ela  - mean(map_ela,  na.rm = TRUE)) / sd(map_ela,  na.rm = TRUE),
+         z_math = (map_math - mean(map_math, na.rm = TRUE)) / sd(map_math, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(c(z_ela, z_math), names_to = "subject", values_to = "z") %>%
+  mutate(subject = recode(subject, z_ela = "MAP ELA", z_math = "MAP Math")) %>%
+  filter(group != "ZIP 63106 cohort") %>%
+  group_by(group, subject, year) %>%
+  summarise(mean_z = mean(z, na.rm = TRUE), n = sum(!is.na(z)), .groups = "drop")
+write_csv(map_trends, file.path(tab_dir, "2000_map_trends.csv"))
+
+p_map <- ggplot(map_trends, aes(x = year, y = mean_z, color = group)) +
+  policy_line +
+  geom_hline(yintercept = 0, color = "#b5b4b0", linewidth = 0.3) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.8) +
+  facet_wrap(~ subject) +
+  scale_color_manual(values = group_colors) +
+  scale_x_continuous(breaks = seq(2014, 2023, 2)) +
+  labs(title = "Standardized MAP scores: CNI-school cohort vs. never treated",
+       subtitle = "No MAP tests in 2020. Dashed line: intervention begins (2019).",
+       x = NULL, y = "Mean score (SD units, within grade × year)") +
+  theme_workshop
+ggsave(file.path(fig_dir, "2000_map_trends.png"), p_map, width = 9, height = 4.5, dpi = 150)
+p_map
+```
+
+## How ZIP 63106 changed
+
+The neighborhood question for synthetic control, using the ACS ZIP panel: after 2019, ZIP 63106 grows, becomes more Black, and its median income falls, while other St. Louis ZIPs change little.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+zip_trends <- zip_year %>%
+  mutate(area = case_when(cni_zip ~ "ZIP 63106",
+                          city    ~ "Other St. Louis City ZIPs",
+                          TRUE    ~ "St. Louis County ZIPs"),
+         area = factor(area, levels = c("ZIP 63106", "Other St. Louis City ZIPs", "St. Louis County ZIPs"))) %>%
+  group_by(area, year) %>%
+  summarise(population    = mean(acs_pop_total),
+            pct_black     = weighted.mean(acs_pct_black, acs_pop_total),
+            median_income = mean(acs_median_income),
+            .groups = "drop")
+write_csv(zip_trends, file.path(tab_dir, "2000_zip_trends.csv"))
+
+area_colors <- c("ZIP 63106" = "#eb6834", "Other St. Louis City ZIPs" = "#2a78d6",
+                 "St. Louis County ZIPs" = "#8a8985")
+
+p_zip <- zip_trends %>%
+  pivot_longer(c(population, pct_black, median_income), names_to = "measure", values_to = "value") %>%
+  mutate(measure = factor(measure, levels = c("population", "pct_black", "median_income"),
+                          labels = c("Population (mean per ZIP)", "Share Black", "Median household income ($)"))) %>%
+  ggplot(aes(x = year, y = value, color = area)) +
+  policy_line +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.6) +
+  facet_wrap(~ measure, scales = "free_y") +
+  scale_color_manual(values = area_colors) +
+  scale_x_continuous(breaks = seq(2014, 2023, 3)) +
+  labs(title = "ZIP 63106 compared with other St. Louis ZIPs (mock ACS)",
+       subtitle = "Each panel has its own scale. Dashed line: intervention begins (2019).",
+       x = NULL, y = NULL) +
+  theme_workshop
+ggsave(file.path(fig_dir, "2000_zip_trends.png"), p_zip, width = 10, height = 4.5, dpi = 150)
+p_zip
+```

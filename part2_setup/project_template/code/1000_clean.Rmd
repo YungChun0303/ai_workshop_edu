@@ -1,0 +1,48 @@
+---
+title: "1000 — Clean and Transform Data"
+author: "[Your Name]"
+date: "[YYYY-MM-DD]"
+output: html_document
+---
+
+<!--
+Purpose: Clean, recode, and reshape data into the analysis file. This is the only stage that writes to `data_clean/`.
+Reads:   data_raw/, data_clean/
+Writes:  data_clean/
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+set.seed(20261016)
+```
+
+## Load imported data
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: read_rds(here::here("data_clean", "0000_imported.rds"))
+```
+
+## Recode and harmonize variables
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: recode / rename to harmonized variable names
+```
+
+## Handle missing values
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: document every drop and imputation decision in a comment
+```
+
+## Construct analysis variables
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: build outcome, treatment, and timing variables
+```
+
+## Save analysis file
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: write_rds(analysis, here::here("data_clean", "1000_analysis.rds"))
+```

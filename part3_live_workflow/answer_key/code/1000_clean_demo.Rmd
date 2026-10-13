@@ -1,0 +1,192 @@
+---
+title: "1000 — Clean the Data and Build the Student-Year Panel"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Handle every data issue listed in answer_key/ground_truth.md and build one
+         student-year analysis panel with covariates, outcomes, and treatment timing.
+Reads:   data_raw/
+Writes:  answer_key/data_clean/1000_student_year.rds
+Packages: here, tidyverse, knitr
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+set.seed(20261016)
+raw_dir   <- here::here("data_raw")
+clean_dir <- here::here("answer_key", "data_clean")
+dir.create(clean_dir, showWarnings = FALSE)
+```
+
+## Study definitions
+
+The intervention (CNI) starts in **2019**. It targets ZIP **63106** and five schools. CNI status is not in the raw files, so it is hard-coded here, as in the original study.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+POLICY_YEAR <- 2019
+CNI_ZIP     <- "63106"
+CNI_SCHOOLS <- c("900100-1410", "900100-1560", "900100-1600", "900100-1930", "900200-1150")
+
+# St. Louis City and County ZIP codes present in the data (study area)
+STL_CITY_ZIPS   <- c(63101, 63102, 63103, 63104, 63106, 63107, 63108, 63109, 63110,
+                     63111, 63112, 63113, 63115, 63116, 63118, 63139, 63147)
+STL_COUNTY_ZIPS <- c(63011, 63017, 63021, 63031, 63033, 63034, 63105, 63114, 63117,
+                     63119, 63121, 63122, 63123, 63124, 63125, 63126, 63127, 63128,
+                     63129, 63130, 63131, 63132, 63133, 63134, 63135, 63136, 63138,
+                     63141, 63144, 63146)
+STL_ZIPS <- as.character(c(STL_CITY_ZIPS, STL_COUNTY_ZIPS))
+```
+
+## Read raw files
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+read_raw <- function(file, ...) {
+  readr::read_csv(file.path(raw_dir, file), show_col_types = FALSE, ...)
+}
+core   <- read_raw("dese_student_core.csv", col_types = cols(zipcode = col_character()))
+test   <- read_raw("dese_student_test.csv")
+enroll <- read_raw("dese_student_enroll.csv")
+disc   <- read_raw("dese_student_discipline.csv")
+```
+
+## Core file: one record per student-year in the study area
+
+Data issues 1–4: mid-year movers have two records (keep the later `seq`), years before 2014 are dropped, ZIP+4 codes are cut to five digits, and blank or out-of-area ZIPs are dropped.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+log_step <- function(log, step, data) {
+  bind_rows(log, tibble(step = step, rows = nrow(data), students = n_distinct(data$research_id)))
+}
+clean_log <- log_step(tibble(), "Raw core records", core)
+
+core1 <- core %>% filter(currentschoolyear >= 2014)
+clean_log <- log_step(clean_log, "Drop years before 2014", core1)
+
+core2 <- core1 %>%
+  group_by(research_id, currentschoolyear) %>%
+  slice_max(seq, n = 1, with_ties = FALSE) %>%
+  ungroup()
+clean_log <- log_step(clean_log, "Keep latest record (highest seq) per student-year", core2)
+
+core3 <- core2 %>%
+  mutate(zip = str_sub(str_trim(zipcode), 1, 5),
+         zip = na_if(zip, "")) %>%
+  filter(!is.na(zip))
+clean_log <- log_step(clean_log, "Drop blank ZIP codes (ZIP+4 cut to 5 digits)", core3)
+
+core4 <- core3 %>% filter(zip %in% STL_ZIPS)
+clean_log <- log_step(clean_log, "Keep St. Louis City/County ZIPs only", core4)
+```
+
+## Recode covariates and flag treatment exposure
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+students <- core4 %>%
+  transmute(
+    research_id,
+    year     = currentschoolyear,
+    grade    = studentgradelevel,
+    zip,
+    school   = paste(reportingdistrictcode, reportingschoolcode, sep = "-"),
+    city     = zip %in% as.character(STL_CITY_ZIPS),
+    female   = gender == 1,
+    black    = raceethnicity == 1,
+    hispanic = raceethnicity == 3,
+    white    = raceethnicity == 2,
+    frl      = lunchstatus %in% c(1, 2),
+    ell      = lepell == 1,
+    iep      = iepdisability > 0,
+    in_cni_school = school %in% CNI_SCHOOLS,
+    in_cni_zip    = zip == CNI_ZIP
+  )
+```
+
+## Treatment cohorts
+
+A student's cohort is the **first year from 2019 on** in which they are observed in a CNI school (`g_school`) or living in ZIP 63106 (`g_zip`). Students never exposed get `0`, the value `did::att_gt()` expects for never-treated units. Treatment is treated as absorbing: once in a cohort, a student stays in it even after moving away (an intent-to-treat definition).
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+first_exposure <- function(exposed, year) {
+  y <- year[exposed & year >= POLICY_YEAR]
+  if (length(y) == 0) 0 else min(y)
+}
+
+students <- students %>%
+  group_by(research_id) %>%
+  mutate(g_school = first_exposure(in_cni_school, year),
+         g_zip    = first_exposure(in_cni_zip, year)) %>%
+  ungroup()
+```
+
+## MAP test scores
+
+Data issues 5–6: scores carrying a +2000 code are corrected (`2195` → `195`). There are no tests in 2020, and some students miss one subject; those stay `NA`.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+map <- test %>%
+  mutate(across(c(map_score1, map_score2), ~ if_else(.x >= 2000, .x - 2000, .x))) %>%
+  transmute(research_id, year = currentschoolyear, map_ela = map_score1, map_math = map_score2)
+stopifnot(!anyDuplicated(map[c("research_id", "year")]))
+```
+
+## Attendance and discipline (placebo outcomes)
+
+Data issue 8: mid-year movers have two enrollment rows, collapsed to one attendance rate weighted by days enrolled. Data issue 7: discipline is one row per incident; it is summed to days per student-year. Missing lengths count as zero days, but the incident is still counted. Students with no discipline record had no removals.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+attendance <- enroll %>%
+  group_by(research_id, year = currentschoolyear) %>%
+  summarise(days_enrolled = sum(daysenrolled),
+            attend_rate   = weighted.mean(attendancerate, daysenrolled),
+            .groups = "drop")
+
+discipline <- disc %>%
+  group_by(research_id, year = currentschoolyear) %>%
+  summarise(n_removals   = n(),
+            susp_days    = sum(lengthremoved[disciplineremoval %in% c(1, 2)], na.rm = TRUE),  # ISS + OSS
+            removal_days = sum(lengthremoved, na.rm = TRUE),
+            .groups = "drop")
+```
+
+## Merge into the student-year panel
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+panel <- students %>%
+  left_join(map,        by = c("research_id", "year")) %>%
+  left_join(attendance, by = c("research_id", "year")) %>%
+  left_join(discipline, by = c("research_id", "year")) %>%
+  mutate(across(c(n_removals, susp_days, removal_days), ~ replace_na(.x, 0))) %>%
+  arrange(research_id, year)
+
+stopifnot(!anyDuplicated(panel[c("research_id", "year")]))
+clean_log <- log_step(clean_log, "Final student-year panel", panel)
+```
+
+## Cleaning log
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+kable(clean_log, format.args = list(big.mark = ","))
+```
+
+## Treatment cohorts in the panel
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+panel %>%
+  distinct(research_id, g_school, g_zip) %>%
+  pivot_longer(c(g_school, g_zip), names_to = "treatment", values_to = "cohort") %>%
+  mutate(cohort = if_else(cohort == 0, "never treated", as.character(cohort))) %>%
+  count(treatment, cohort, name = "students") %>%
+  pivot_wider(names_from = treatment, values_from = students) %>%
+  kable(format.args = list(big.mark = ","))
+```
+
+## Save the analysis file
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+write_rds(panel, file.path(clean_dir, "1000_student_year.rds"))
+```

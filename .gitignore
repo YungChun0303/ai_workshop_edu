@@ -1,0 +1,27 @@
+# --- Generated data (rebuilt by the 1000-series scripts) ---
+part3_live_workflow/data_clean/*
+!part3_live_workflow/data_clean/.gitkeep
+part3_live_workflow/answer_key/data_clean/*
+!part3_live_workflow/answer_key/data_clean/.gitkeep
+
+# --- Knit artifacts ---
+**/code/*.html
+*_cache/
+*_files/
+
+# --- Secrets and credentials ---
+.Renviron
+.env
+
+# --- R / RStudio ---
+.Rhistory
+.RData
+.Rproj.user/
+
+# --- OS / sync clutter ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local settings ---
+.claude/settings.local.json

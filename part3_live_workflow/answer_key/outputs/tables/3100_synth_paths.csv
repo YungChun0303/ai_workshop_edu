@@ -1,0 +1,61 @@
+time_unit,outcome,series,value
+2014,Population,ZIP 63106,13466
+2014,Population,Synthetic 63106,13263.43353950405
+2015,Population,ZIP 63106,13337
+2015,Population,Synthetic 63106,13442.870201638983
+2016,Population,ZIP 63106,13152
+2016,Population,Synthetic 63106,13364.020094241185
+2017,Population,ZIP 63106,13701
+2017,Population,Synthetic 63106,13635.472378435854
+2018,Population,ZIP 63106,13603
+2018,Population,Synthetic 63106,13557.966602317885
+2019,Population,ZIP 63106,14951
+2019,Population,Synthetic 63106,13540.538967658962
+2020,Population,ZIP 63106,16304
+2020,Population,Synthetic 63106,13582.423571016408
+2021,Population,ZIP 63106,17512
+2021,Population,Synthetic 63106,13478.644221944629
+2022,Population,ZIP 63106,19152
+2022,Population,Synthetic 63106,13768.091293513553
+2023,Population,ZIP 63106,20722
+2023,Population,Synthetic 63106,13750.982991557785
+2014,Share Black,ZIP 63106,0.699
+2014,Share Black,Synthetic 63106,0.6982076539830794
+2015,Share Black,ZIP 63106,0.706
+2015,Share Black,Synthetic 63106,0.7021504129432818
+2016,Share Black,ZIP 63106,0.703
+2016,Share Black,Synthetic 63106,0.7028212026591396
+2017,Share Black,ZIP 63106,0.7
+2017,Share Black,Synthetic 63106,0.697306991760357
+2018,Share Black,ZIP 63106,0.695
+2018,Share Black,Synthetic 63106,0.6961462532483408
+2019,Share Black,ZIP 63106,0.733
+2019,Share Black,Synthetic 63106,0.693245754660838
+2020,Share Black,ZIP 63106,0.763
+2020,Share Black,Synthetic 63106,0.6890723519009795
+2021,Share Black,ZIP 63106,0.809
+2021,Share Black,Synthetic 63106,0.6880898729897187
+2022,Share Black,ZIP 63106,0.844
+2022,Share Black,Synthetic 63106,0.6830098073602519
+2023,Share Black,ZIP 63106,0.876
+2023,Share Black,Synthetic 63106,0.6855833410638186
+2014,Median household income ($),ZIP 63106,55517
+2014,Median household income ($),Synthetic 63106,56456.72758144046
+2015,Median household income ($),ZIP 63106,59088
+2015,Median household income ($),Synthetic 63106,58938.75485458379
+2016,Median household income ($),ZIP 63106,59945
+2016,Median household income ($),Synthetic 63106,59974.520084623735
+2017,Median household income ($),ZIP 63106,62467
+2017,Median household income ($),Synthetic 63106,61721.458940079385
+2018,Median household income ($),ZIP 63106,64537
+2018,Median household income ($),Synthetic 63106,63779.84729145338
+2019,Median household income ($),ZIP 63106,60333
+2019,Median household income ($),Synthetic 63106,64167.53035335635
+2020,Median household income ($),ZIP 63106,60565
+2020,Median household income ($),Synthetic 63106,66866.28981105277
+2021,Median household income ($),ZIP 63106,59467
+2021,Median household income ($),Synthetic 63106,69450.32489159136
+2022,Median household income ($),ZIP 63106,58301
+2022,Median household income ($),Synthetic 63106,69495.85280644521
+2023,Median household income ($),ZIP 63106,57627
+2023,Median household income ($),Synthetic 63106,71478.53132718729

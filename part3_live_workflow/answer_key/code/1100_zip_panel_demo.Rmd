@@ -1,0 +1,96 @@
+---
+title: "1100 — Build the ZIP-Year Panel"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Collapse the cleaned student-year panel to ZIP x year (number of students,
+         composition, move-in rate) and join the mock ACS ZIP panel, which supplies
+         the synthetic control outcomes and predictors.
+Reads:   answer_key/data_clean/1000_student_year.rds, data_raw/acs_zip_panel_mock.csv
+Writes:  answer_key/data_clean/1100_zip_year.rds
+Packages: here, tidyverse, knitr
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+set.seed(20261016)
+clean_dir <- here::here("answer_key", "data_clean")
+```
+
+## Load inputs
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+panel <- read_rds(file.path(clean_dir, "1000_student_year.rds"))
+acs <- read_csv(here::here("data_raw", "acs_zip_panel_mock.csv"), show_col_types = FALSE) %>%
+  transmute(zip = as.character(zip), year,
+            acs_median_income = median_income,
+            acs_pct_black     = pct_black,
+            acs_pop_total     = pop_total)
+```
+
+## Flag residential moves
+
+A student **moved in** to a ZIP if they lived in a different St. Louis ZIP the year before. Students entering the panel for the first time are not counted as movers, because their prior address is unknown.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+panel <- panel %>%
+  arrange(research_id, year) %>%
+  group_by(research_id) %>%
+  mutate(prev_zip  = lag(zip),
+         prev_year = lag(year),
+         moved_in  = !is.na(prev_zip) & prev_year == year - 1 & prev_zip != zip) %>%
+  ungroup()
+```
+
+## Collapse to ZIP x year
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+zip_year <- panel %>%
+  group_by(zip, year) %>%
+  summarise(
+    n_students   = n(),
+    pct_black    = mean(black),
+    pct_frl      = mean(frl),
+    pct_ell      = mean(ell),
+    rate_move_in = mean(moved_in),
+    .groups = "drop"
+  ) %>%
+  left_join(acs, by = c("zip", "year")) %>%
+  mutate(city    = zip %in% unique(panel$zip[panel$city]),
+         cni_zip = zip == "63106")
+
+stopifnot(!anyDuplicated(zip_year[c("zip", "year")]))
+```
+
+## Check the panel
+
+The panel covers every ZIP-year. Synthetic control (`3100_synth_demo.Rmd`) uses the ACS columns, which describe each ZIP's whole population; the student columns describe the school-age sample and feed the descriptives. Donor-pool rules are applied in `3100`, so they stay visible next to the model.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+zip_year %>%
+  summarise(zips = n_distinct(zip),
+            zip_years = n(),
+            years = paste(range(year), collapse = "–"),
+            median_students = median(n_students),
+            share_30_plus = mean(n_students >= 30),
+            missing_acs = sum(is.na(acs_median_income))) %>%
+  kable(digits = 2)
+```
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+zip_year %>%
+  filter(cni_zip) %>%
+  select(year, n_students, pct_black, pct_frl, rate_move_in, acs_pop_total, acs_pct_black, acs_median_income) %>%
+  kable(digits = 3, caption = "ZIP 63106 by year")
+```
+
+## Save
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+write_rds(zip_year, file.path(clean_dir, "1100_zip_year.rds"))
+```

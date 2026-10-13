@@ -1,0 +1,138 @@
+---
+title: "0000 — Import and Inspect the Raw Data"
+subtitle: "AI-Empowered Research workshop · synthetic St. Louis data"
+date: "2026-10-16"
+output: html_document
+---
+
+<!--
+Purpose: Read the seven raw CSV files, confirm they loaded as expected, and check
+         every categorical code against data_raw/codebook.md.
+Reads:   data_raw/
+Writes:  nothing (inspection only)
+Packages: here, tidyverse, knitr
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+library(knitr)
+set.seed(20261016)
+raw_dir <- here::here("data_raw")
+```
+
+All data are **synthetic**. See `data_raw/codebook.md` for the codebook; the built-in data issues are listed in `answer_key/ground_truth.md`.
+
+## Read raw files
+
+ZIP codes are stored as text because some carry a ZIP+4 suffix (`63106-1234`). Reading them as numbers would silently turn those into `NA`.
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+read_raw <- function(file, ...) {
+  readr::read_csv(file.path(raw_dir, file), show_col_types = FALSE, ...)
+}
+
+core     <- read_raw("dese_student_core.csv", col_types = cols(zipcode = col_character()))
+test     <- read_raw("dese_student_test.csv")
+enroll   <- read_raw("dese_student_enroll.csv")
+disc     <- read_raw("dese_student_discipline.csv")
+schools  <- read_raw("building_list.csv", col_types = cols(.default = col_character()))
+sch_demo <- read_raw("dese_school_demo.csv")
+acs      <- read_raw("acs_zip_panel_mock.csv")
+```
+
+## File dimensions
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+files <- list(core = core, test = test, enroll = enroll, discipline = disc,
+              building_list = schools, school_demo = sch_demo, acs = acs)
+
+tibble(
+  file     = names(files),
+  rows     = map_int(files, nrow),
+  columns  = map_int(files, ncol),
+  students = map_int(files, ~ if ("research_id" %in% names(.x)) n_distinct(.x$research_id) else NA_integer_),
+  years    = map_chr(files, function(d) {
+    yr <- intersect(c("currentschoolyear", "year"), names(d))
+    if (length(yr)) paste(range(d[[yr[1]]]), collapse = "–") else "—"
+  })
+) %>% kable()
+```
+
+## Column types
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+map_dfr(files, ~ tibble(column = names(.x), type = map_chr(.x, ~ class(.x)[1])), .id = "file") %>%
+  group_by(file, type) %>%
+  summarise(columns = paste(column, collapse = ", "), .groups = "drop") %>%
+  kable()
+```
+
+## Check codes against the codebook
+
+Every categorical value should appear in the codebook. Any row with `in_codebook = FALSE` needs a decision before cleaning.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+codebook <- list(
+  gender            = 1:2,
+  raceethnicity     = 1:5,
+  studentgradelevel = 0:12,
+  lunchstatus       = 0:2,
+  lepell            = 0:1,
+  iepdisability     = 0:6,
+  seq               = 1:2
+)
+
+core_codes <- imap_dfr(codebook, function(valid, var) {
+  core %>% count(value = .data[[var]]) %>% mutate(variable = var, in_codebook = value %in% valid)
+})
+disc_codes <- disc %>% count(value = disciplineremoval) %>%
+  mutate(variable = "disciplineremoval", in_codebook = value %in% 1:4)
+
+bind_rows(core_codes, disc_codes) %>%
+  group_by(variable) %>%
+  summarise(values = paste(sort(value), collapse = ", "),
+            all_in_codebook = all(in_codebook), .groups = "drop") %>%
+  kable()
+```
+
+## First look at the messiness
+
+Counts only — no individual records are printed.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+tibble(
+  check = c("Core records before 2014",
+            "Student-years with more than one record (mid-year movers)",
+            "ZIP codes in ZIP+4 format",
+            "Blank ZIP codes",
+            "MAP ELA scores carrying the +2000 code",
+            "MAP Math scores carrying the +2000 code",
+            "MAP test records in 2020",
+            "Discipline incidents with missing length",
+            "Student-years with more than one enrollment row"),
+  n = c(sum(core$currentschoolyear < 2014),
+        core %>% count(research_id, currentschoolyear) %>% filter(n > 1) %>% nrow(),
+        sum(str_detect(core$zipcode, "-"), na.rm = TRUE),
+        sum(is.na(core$zipcode) | core$zipcode == ""),
+        sum(test$map_score1 >= 2000, na.rm = TRUE),
+        sum(test$map_score2 >= 2000, na.rm = TRUE),
+        sum(test$currentschoolyear == 2020),
+        sum(is.na(disc$lengthremoved)),
+        enroll %>% count(research_id, currentschoolyear) %>% filter(n > 1) %>% nrow())
+) %>% kable()
+```
+
+## Where do students live?
+
+The study area is St. Louis City and County. ZIPs outside it (Kansas City `641xx`, Columbia `652xx`, Springfield `658xx`) are dropped in cleaning.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+core %>%
+  mutate(zip3 = str_sub(zipcode, 1, 3)) %>%
+  count(zip3, name = "records") %>%
+  mutate(area = case_when(is.na(zip3) | zip3 == "" ~ "Missing ZIP",
+                          zip3 %in% c("630", "631") ~ "St. Louis area",
+                          TRUE ~ "Out of area")) %>%
+  kable()
+```

@@ -1,0 +1,26 @@
+# --- Data: never commit research data ---
+data_raw/*
+!data_raw/.gitkeep
+data_clean/*
+!data_clean/.gitkeep
+
+# --- Secrets and credentials ---
+.Renviron
+.env
+*.pem
+*.key
+
+# --- R / RStudio ---
+.Rhistory
+.RData
+.Rproj.user/
+*_cache/
+*_files/
+
+# --- OS / sync clutter ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local settings (personal, not shared) ---
+.claude/settings.local.json

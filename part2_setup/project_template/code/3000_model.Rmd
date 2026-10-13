@@ -1,0 +1,42 @@
+---
+title: "3000 — Main Model"
+author: "[Your Name]"
+date: "[YYYY-MM-DD]"
+output: html_document
+---
+
+<!--
+Purpose: Estimate the primary specification defined in `CLAUDE.md` §6, then robustness checks.
+Reads:   data_clean/
+Writes:  outputs/tables/, outputs/figures/
+-->
+
+```{r, include = FALSE}
+library(here)
+library(tidyverse)
+set.seed(20261016)
+```
+
+## Load analysis file
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: read_rds(here::here("data_clean", "1000_analysis.rds"))
+```
+
+## Primary specification
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: estimate the primary specification from CLAUDE.md §6
+```
+
+## Robustness checks
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: estimate each robustness check listed in CLAUDE.md §6
+```
+
+## Export results
+
+```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
+# TODO: save estimates to here::here("outputs", "tables", "3000_<name>.csv") and plots to outputs/figures/
+```
