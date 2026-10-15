@@ -46,7 +46,7 @@ By the end of this session, participants will be able to:
 | 9:25–10:10 | **Part 2 · Setup: Claude CLI, R & the Project Folder** | Installation, folder structure, and `CLAUDE.md` |
 | 10:10–10:20 | *Break* | |
 | 10:20–11:05 | **Part 3 · Live Workflow: An Education-Policy Study** | Folder → cleaning → analysis → Methods/Results draft, on synthetic data |
-| 11:05–11:25 | **Part 4 · Ethics: The Suit Is Not the Scientist** | Understanding vs. responsibility; disclosure; data tiers; red lines |
+| 11:05–11:25 | **Part 4 · Ethics: The Suit Is Not the Scientist** | Data tiers; red lines; disclosure; contribution statements; understanding vs. responsibility |
 | 11:25–11:30 | **Q&A** | |
 
 ---
@@ -103,15 +103,16 @@ By the end of this session, participants will be able to:
 **Goals.** Move from "who wrote this?" to "who answers for this?" — and leave with concrete rules.
 
 **Topics.**
-- **The argument.** If a machine can produce an accurate, novel, well-cited paper, the written artifact no longer certifies the author's understanding. What institutions can still demand is *responsibility*: a person who answers for the claim.
-- **Making responsibility explicit.** Contribution statements that say plainly what the author did and what the machine did; when AI use requires disclosure in a manuscript.
 - **Data-sensitivity tiers.** Matching each dataset to the workspace approved for it.
 - **Red lines.**
-  - No PHI in Claude Code, Claude Edu, or any browser AI — PHI belongs only in Claude Secure.
+  - No PHI in Claude Code, Claude Edu, or any agentic tool: PHI goes only into a PHI-approved workspace (for Claude, Claude Secure).
   - No citations you have not personally opened and verified.
   - No AI-only qualitative coding.
   - No uploading manuscripts you are peer-reviewing.
   - No credentials or secrets committed to a repository.
+- **Disclosure and contribution statements.** When AI use requires disclosure in a manuscript, and statements that say plainly what the author did and what the machine did.
+- **Pre-flight.** Five questions to ask before using AI on a project.
+- **The argument.** If a machine can produce an accurate, novel, well-cited paper, the written artifact no longer certifies the author's understanding. What institutions can still demand is *responsibility*: a person who answers for the claim.
 
 **Materials.** [*The Suit Is Not the Scientist*](https://yungchun.substack.com/p/the-suit-is-not-the-scientist) (op-ed, 2026-09-25; link in `part4_ethics/article/`).
 
@@ -203,4 +204,3 @@ Sources: [ai.washu.edu/tools](https://ai.washu.edu/tools), [it.washu.edu/claude-
 | `part3_live_workflow/` | The demonstration project: case `CLAUDE.md`, `prompts/` (five reusable prompts), `data_raw/` (synthetic data and codebook, no real records), `answer_key/` (finished scripts and outputs); Part 3 slides |
 | `part4_ethics/` | `article/` (*The Suit Is Not the Scientist*); `ai_use_disclosure_guide.md` (disclosure and data-security one-pager); Part 4 slides |
 
-Slides and the article are added as they are finalized before the workshop.
