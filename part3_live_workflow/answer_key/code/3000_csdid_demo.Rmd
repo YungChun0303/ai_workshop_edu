@@ -69,14 +69,26 @@ tibble(student_years = nrow(map), students = n_distinct(map$research_id),
 
 ## Benchmark: the effect built into the data
 
-The synthetic data add **+4 MAP points** for every year a student attends a CNI school and **+1.5 points** for every year a student lives in ZIP 63106, from 2019 on. Because cohorts are defined by first exposure (students stay in their cohort if they later leave), the effect a cohort actually experiences is the average exposure after entry. That average, in SD units, is the benchmark for CSDID.
+The synthetic data add a **dynamic** effect after a student first enters a CNI school (2019 or later), and it stays with the student even after they leave: **+5 MAP points in year 1, +9 in year 2, +13.5 in year 3, then a return to a smaller effect from year 4 on (+7.5 ELA, +6 Math).** The year-4+ ELA value is planted a little higher because this estimator (which falls back to comparing repeated cross-sections) understates later years for ELA by about 2–3 points; with that, the event study shows roughly +4–6 points from year 4 on in both subjects. Living in ZIP 63106 has **no** separate effect; the ZIP cohort's effect comes only through the CNI schools its students attend. The benchmark for CSDID is the planted effect averaged over the treated student-years, in SD units (scores standardized within grade × year).
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
+# MAP points by years since first CNI-school entry (1, 2, 3, 4+)
+EFFECT_PATH <- list(ela = c(5, 9, 13.5, 7.5), math = c(5, 9, 13.5, 6))
+planted <- function(e, subject) {   # vectorized over e and subject
+  subject <- rep_len(subject, length(e))
+  k <- pmin(pmax(e, 1), 4)
+  val <- ifelse(subject == "ela", EFFECT_PATH$ela[k], EFFECT_PATH$math[k])
+  ifelse(e <= 0, 0, val)
+}
 sd_map <- mean(map$sd_ela)
+map <- map %>% mutate(e_school = if_else(g_school > 0, year - g_school + 1, 0),
+                      truth_ela = planted(e_school, "ela"), truth_math = planted(e_school, "math"))
 benchmark <- bind_rows(
-  map %>% filter(post_school) %>% summarise(treatment = "CNI school", points = mean(4 * in_cni_school + 1.5 * in_cni_zip)),
-  map %>% filter(post_zip)    %>% summarise(treatment = "ZIP 63106",  points = mean(4 * in_cni_school + 1.5 * in_cni_zip))
-) %>% mutate(sd_units = points / sd_map)
+  map %>% filter(post_school) %>% summarise(treatment = "CNI school", ela = mean(truth_ela), math = mean(truth_math)),
+  map %>% filter(post_zip)    %>% summarise(treatment = "ZIP 63106",  ela = mean(truth_ela), math = mean(truth_math))
+) %>%
+  pivot_longer(c(ela, math), names_to = "subject", values_to = "points") %>%
+  mutate(sd_units = points / sd_map)
 kable(benchmark, digits = 2)
 ```
 
@@ -91,7 +103,10 @@ twfe_tab <- as_tibble(coeftable(twfe)) %>%
   transmute(outcome = recode(lhs, map_ela = "MAP ELA", map_math = "MAP Math"),
             term = recode(coefficient, post_schoolTRUE = "CNI school", post_zipTRUE = "ZIP 63106"),
             estimate_points = Estimate, se = `Std. Error`,
-            truth_points = if_else(term == "CNI school", 4, 1.5))
+            subject = if_else(outcome == "MAP ELA", "ela", "math")) %>%
+  left_join(benchmark %>% filter(treatment == "CNI school") %>% select(subject, truth_points = points), by = "subject") %>%
+  mutate(truth_points = if_else(term == "CNI school", truth_points, 0)) %>%
+  select(-subject)
 write_csv(twfe_tab, file.path(tab_dir, "3000_twfe.csv"))
 kable(twfe_tab, digits = 2)
 ```
@@ -100,6 +115,7 @@ kable(twfe_tab, digits = 2)
 
 ```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
 run_csdid <- function(data, outcome, cohort) {
+  data <- data %>% filter(!is.na(.data[[outcome]]))   # avoids did's "dropped rows" warning
   att_gt(yname = outcome, tname = "year", idname = "research_id", gname = cohort,
          data = as.data.frame(data), control_group = "notyettreated",
          allow_unbalanced_panel = TRUE, cband = FALSE)
@@ -115,7 +131,9 @@ csdid_fits <- pmap(specs, function(outcome, cohort) run_csdid(map, outcome, coho
 csdid_tab <- pmap_dfr(list(csdid_fits, specs$outcome, specs$cohort), function(gt, outcome, cohort) {
   summarise_csdid(gt, outcome, if_else(cohort == "g_school", "CNI school", "ZIP 63106"))
 }) %>%
-  left_join(benchmark %>% select(treatment, truth_sd = sd_units), by = "treatment") %>%
+  mutate(subject = if_else(outcome == "z_ela", "ela", "math")) %>%
+  left_join(benchmark %>% select(treatment, subject, truth_sd = sd_units), by = c("treatment", "subject")) %>%
+  select(-subject) %>%
   mutate(outcome = recode(outcome, z_ela = "MAP ELA (SD)", z_math = "MAP Math (SD)"),
          ci_low = att - 1.96 * se, ci_high = att + 1.96 * se)
 write_csv(csdid_tab, file.path(tab_dir, "3000_csdid.csv"))
@@ -127,7 +145,7 @@ kable(csdid_tab, digits = 3, caption = "CSDID average effect (SD units) next to 
 
 ## Event study
 
-Effects by years since entry. Pre-entry estimates near zero support the parallel-trends assumption; post-entry estimates show the effect.
+Effects by years since entry (event time 0 = the first year in a CNI school). Pre-entry estimates near zero support the parallel-trends assumption. After entry, the planted effect rises for three years and then falls back; the red marks show it in SD units.
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
 event <- map2_dfr(csdid_fits[specs$cohort == "g_school"], specs$outcome[specs$cohort == "g_school"],
@@ -135,7 +153,8 @@ event <- map2_dfr(csdid_fits[specs$cohort == "g_school"], specs$outcome[specs$co
   es <- aggte(gt, type = "dynamic", min_e = -4, max_e = 4, na.rm = TRUE)
   tibble(outcome = recode(outcome, z_ela = "MAP ELA", z_math = "MAP Math"),
          event_time = es$egt, att = es$att.egt, se = es$se.egt)
-})
+}) %>%
+  mutate(truth_sd = planted(event_time + 1, if_else(outcome == "MAP ELA", "ela", "math")) / sd_map)
 write_csv(event, file.path(tab_dir, "3000_event_study_school.csv"))
 
 p_event <- ggplot(event, aes(x = event_time, y = att)) +
@@ -144,10 +163,11 @@ p_event <- ggplot(event, aes(x = event_time, y = att)) +
   geom_errorbar(aes(ymin = att - 1.96 * se, ymax = att + 1.96 * se),
                 width = 0.15, color = "#2a78d6", linewidth = 0.5) +
   geom_point(size = 2.2, color = "#2a78d6") +
+  geom_point(aes(y = truth_sd), shape = 4, size = 3, stroke = 1.1, color = "#c8102e") +
   facet_wrap(~ outcome) +
   scale_x_continuous(breaks = -4:4) +
   labs(title = "Event study: entering a CNI school",
-       subtitle = "CSDID, not-yet-treated comparison group, 95% confidence intervals",
+       subtitle = "CSDID, not-yet-treated comparison group, 95% CIs. Red ×: planted effect",
        x = "Years since entering a CNI school", y = "Effect on MAP (SD units)") +
   theme_workshop
 ggsave(file.path(fig_dir, "3000_event_study_school.png"), p_event, width = 9, height = 4.5, dpi = 150)
@@ -156,19 +176,34 @@ p_event
 
 ## Pitfall: CSDID on raw MAP points
 
-**Teaching moment.** Run the same model on raw scale scores. With an unbalanced student panel, `att_gt()` falls back to comparing repeated cross-sections, so each cohort is compared with its own younger, lower-grade self — and normal grade-to-grade growth is counted as a treatment effect. Ask the room: is a 10-point effect plausible when a year of school is worth 5–6 points?
+**Teaching moment.** Run the same model on raw scale scores. With an unbalanced student panel, `att_gt()` falls back to comparing repeated cross-sections, so each cohort is compared with its own younger, lower-grade self — and normal grade-to-grade growth (5–6 points a year) is counted as a treatment effect. The raw-points estimates come out larger than the standardized ones by roughly a year of growth or more. Ask the room: does the raw number agree with the standardized estimate (converted to points with SD ≈ 12)? If not, which one is measuring the program?
 
 ```{r, echo = TRUE, results = 'hide', message = FALSE, warning = FALSE}
-pitfall <- map_dfr(c("map_ela", "map_math"), function(y) {
-  summarise_csdid(run_csdid(map, y, "g_school"), y, "CNI school")
-}) %>%
-  left_join(benchmark %>% select(treatment, truth_points = points), by = "treatment") %>%
+pitfall_fits <- set_names(map(c("map_ela", "map_math"), ~ run_csdid(map, .x, "g_school")), c("map_ela", "map_math"))
+pitfall <- imap_dfr(pitfall_fits, function(gt, y) summarise_csdid(gt, y, "CNI school")) %>%
+  mutate(subject = if_else(outcome == "map_ela", "ela", "math")) %>%
+  left_join(benchmark %>% select(treatment, subject, truth_points = points), by = c("treatment", "subject")) %>%
+  select(-subject) %>%
   mutate(outcome = recode(outcome, map_ela = "MAP ELA (raw points)", map_math = "MAP Math (raw points)"))
 write_csv(pitfall, file.path(tab_dir, "3000_pitfall_raw_points.csv"))
+
+# Year-by-year comparison: raw points vs. standardized estimate converted to points vs. planted
+pitfall_event <- imap_dfr(pitfall_fits, function(gt, y) {
+  es <- aggte(gt, type = "dynamic", min_e = 0, max_e = 4, na.rm = TRUE)
+  tibble(outcome = recode(y, map_ela = "MAP ELA", map_math = "MAP Math"),
+         event_time = es$egt, raw_points = es$att.egt)
+}) %>%
+  left_join(event %>% filter(event_time >= 0) %>% transmute(outcome, event_time, std_in_points = att * sd_map),
+            by = c("outcome", "event_time")) %>%
+  mutate(planted_points = planted(event_time + 1, if_else(outcome == "MAP ELA", "ela", "math")),
+         year_since_entry = event_time + 1)
+write_csv(pitfall_event, file.path(tab_dir, "3000_pitfall_by_year.csv"))
 ```
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
 kable(pitfall, digits = 2, caption = "CSDID on raw points: biased upward by grade growth")
+kable(pitfall_event %>% select(outcome, year_since_entry, raw_points, std_in_points, planted_points), digits = 1,
+      caption = "By year since entry: raw-points CSDID vs. standardized CSDID (in points) vs. planted effect")
 ```
 
 ## Placebo outcomes

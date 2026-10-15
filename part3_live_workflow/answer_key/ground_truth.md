@@ -15,10 +15,12 @@ Seeded (`set.seed(20261016)`), takes a few seconds, needs `dplyr`, `tidyr`, and 
 
 ## The story
 
-The fictional **CNI (Choice Neighborhoods Initiative)** starts in **2019** in ZIP **63106** and five schools (listed in `data_raw/codebook.md`). From 2019 on, Black, low-income families become much more likely to move into 63106 and to enroll in CNI schools, while other families become less likely to move there. Two research questions follow:
+The fictional **CNI (Choice Neighborhoods Initiative)** starts in **2019** in ZIP **63106** and five schools (listed in `data_raw/codebook.md`). Two research questions follow:
 
-1. **Neighborhood:** Did 63106 change (population, racial composition, income)? → synthetic control on the ACS ZIP panel.
-2. **Students:** Did students who entered a CNI school, or moved into 63106, do better on MAP tests? → staggered DiD (Callaway & Sant'Anna).
+1. **Neighborhood:** Did 63106 change (population, racial composition, income)? → synthetic control on the ACS ZIP panel. *Planted story:* redevelopment temporarily displaces residents (population dips in 2019 and recovers by 2021), the racial composition does not change, and incomes rise from 2021 on.
+2. **Students:** Did students who entered a CNI school, or moved into 63106, do better on MAP tests? → staggered DiD (Callaway & Sant'Anna). *Planted story:* a quick gain that peaks in the third year in a CNI school, then settles at a smaller lasting effect.
+
+*Revised 2026-10-15* (the effects were changed for teaching; the data stay synthetic). Student moves were left as before, so all data issues and counts below are unchanged; the ACS ZIP panel is generated separately, so the neighborhood story comes from it.
 
 Sizes: 4,400 students (4,000 who live in St. Louis City/County, 400 out of area); 23,077 core records; 21,815 enrollment rows; 2,652 discipline incidents; 7,051 test rows; 54 schools in 6 districts; 470 ACS ZIP-years (47 ZIPs, 2014–2023).
 
@@ -41,64 +43,79 @@ Cleaning all eight yields **15,737 student-years for 3,975 students** (`answer_k
 
 ### Students (MAP scores)
 
-MAP scores have linear grade growth (5–6 points a year), common year shocks (a 2021–2023 pandemic dip), student ability, and gaps by FRPL, ELL, and IEP status. Selection into treatment depends only on time-invariant traits, so **parallel trends hold by construction**. From 2019 on, in every year a student is exposed:
+MAP scores have linear grade growth (5–6 points a year), common year shocks (a 2021–2023 pandemic dip), student ability, and gaps by FRPL, ELL, and IEP status. Selection into treatment depends only on time-invariant traits, so **parallel trends hold by construction**.
 
-| Exposure | Effect on MAP ELA and Math | In SD units (within grade × year SD ≈ 12) |
-|---|---|---|
-| Enrolled in a CNI school | **+4 points** | ≈ 0.33 SD |
-| Living in ZIP 63106 | **+1.5 points** | ≈ 0.12 SD |
+The effect depends on **years since a student first entered a CNI school** (2019 or later) and is **absorbing**: it stays with the student after they leave. Living in ZIP 63106 has **no** separate effect.
+
+| Year since first CNI-school entry | 1 | 2 | 3 | 4 and later |
+|---|---|---|---|---|
+| Planted, MAP ELA (points) | +5 | +9 | +13.5 | **+7.5** |
+| Planted, MAP Math (points) | +5 | +9 | +13.5 | **+6** |
+| What the CSDID event study shows (ELA / Math, points) | +4.2 / +4.6 | +7.0 / +8.0 | **+12.9 / +13.8** | **+4.6 / +4.7** (year 5: +4.3 / +4.9) |
+
+Why year 4+ is planted higher for ELA: with an unbalanced student panel, `att_gt()` falls back to comparing repeated cross-sections, and in years 4–5 only the 2019 and 2020 entry cohorts remain, so which of their students are in tested grades shifts as they age. That composition shift pulls the late ELA estimates down by about 3 points (Math by about 1). The planted values were tuned so the event study **shows** about +4–6 points from year 4 on in both subjects. In SD units (within grade × year SD ≈ 12), the peak is about 1.1 SD.
 
 Attendance and discipline have **no** planted effect.
 
-Treatment cohorts are defined by first exposure (2019 or later) and are absorbing, so the effect a cohort actually experiences is its average exposure after entry: **3.87 points ≈ 0.32 SD** for the CNI-school cohort and **4.30 points ≈ 0.36 SD** for the ZIP-63106 cohort (most ZIP movers also enroll in CNI schools).
-
 ### Neighborhood (ACS ZIP panel)
 
-The ACS file is generated at the ZIP level, so its precision does not depend on the number of simulated students. For ZIP 63106, from 2019 on (t = 1 in 2019, …, 5 in 2023):
+The ACS file is generated at the ZIP level, so its precision does not depend on the number of simulated students. For ZIP 63106, relative to its own trend:
 
-| Outcome | Planted change |
-|---|---|
-| `pop_total` | × (1 + 0.10 t): +10% a year, +50% by 2023 |
-| `pct_black` | + 0.035 t: +3.5 pp a year, +17.5 pp by 2023 |
-| `median_income` | × (1 − 0.04 t): −4% a year, −20% by 2023 |
+| Outcome | 2019 | 2020 | 2021 | 2022 | 2023 |
+|---|---|---|---|---|---|
+| `pop_total` | **−12%** | **−4%** | 0 | 0 | 0 |
+| `pct_black` | 0 | 0 | 0 | 0 | 0 |
+| `median_income` | 0 | 0 | **+6%** | **+9%** | **+12%** |
 
 ZIP 63106's pre-2019 levels sit inside the range of the donor ZIPs, so a synthetic control can match them.
 
-## Answer-key results (knit 2026-10-12)
+## Answer-key results (knit 2026-10-15)
 
 ### Students: CSDID (`3000_csdid_demo.Rmd`)
 
-`did::att_gt()`, not-yet-treated controls, `allow_unbalanced_panel = TRUE`, simple aggregation. MAP standardized within grade × year.
+`did::att_gt()`, not-yet-treated controls, `allow_unbalanced_panel = TRUE`, rows with a missing outcome dropped before estimation. MAP standardized within grade × year. **No convergence, optimizer, or singular-matrix warnings**; the only messages are `did`'s informational "No units in group … in time period …" (later cohorts have no tested students in early years).
 
-| Estimate | ELA | Math | Truth |
+**Event study (standardized estimate converted to points; years since entry):**
+
+| | Year 1 | Year 2 | Year 3 | Year 4 | Year 5 |
+|---|---|---|---|---|---|
+| ELA | +4.2 | +7.0 | **+12.9** | +4.6 | +4.3 |
+| Math | +4.6 | +8.0 | **+13.8** | +4.7 | +4.9 |
+| Raw-points CSDID, ELA (pitfall) | +8.3 | +13.2 | **+23.1** | +8.9 | +12.7 |
+| Raw-points CSDID, Math (pitfall) | +9.5 | +14.9 | **+25.1** | +8.8 | +14.1 |
+
+Pre-entry estimates are near zero (event time −1: about −0.15 SD, CI covers 0).
+
+| Estimate | ELA | Math | Planted average |
 |---|---|---|---|
-| CSDID, CNI-school cohort (SD) | 0.19 (SE 0.09) | 0.29 (SE 0.09) | 0.32 |
-| CSDID, ZIP-63106 cohort (SD) | 0.46 (SE 0.15) | 0.45 (SE 0.14) | 0.36 |
-| TWFE, CNI school (points) | 3.9 | 4.8 | 4 |
-| TWFE, ZIP 63106 (points) | 3.5 | 2.6 | 1.5 |
-| **Pitfall:** CSDID on raw points, CNI-school cohort | 8.5 | 10.3 | 3.9 |
+| CSDID simple ATT, CNI-school cohort (SD) | 0.56 (SE 0.08) | 0.61 (SE 0.09) | 0.70 / 0.67 |
+| CSDID simple ATT, ZIP-63106 cohort (SD) | 0.54 (SE 0.15) | 0.51 (SE 0.14) | 0.55 / 0.52 (via CNI schools only) |
+| TWFE, CNI school (points) | 7.6 | 8.4 | 8.5 / 8.1 |
+| TWFE, ZIP 63106 (points) | 2.0 | 1.3 | 0 |
+| **Pitfall:** raw-points CSDID, CNI-school cohort (points) | 13.4 | 14.6 | 8.5 / 8.1 |
 | Placebo: attendance rate | −0.005 (school), −0.006 (ZIP) | | 0 |
-| Placebo: suspension days | 0.03 (school), −0.42 (SE 0.34, ZIP) | | 0 |
+| Placebo: suspension days | 0.03 (school), −0.42 (SE 0.33, ZIP) | | 0 |
 
-Every 95% CI for the CSDID estimates covers the truth. The event study shows pre-entry estimates near zero.
+The 95% CIs of the CSDID ATTs cover the planted averages. The ZIP cohort's effect comes entirely through CNI schools (most students who move into 63106 also enroll in one), which is the Step 05 "overstated" point.
 
-**The live teaching moment:** with an unbalanced student panel, `att_gt()` falls back to repeated cross-sections and compares each cohort with its own younger, lower-grade self, so grade growth shows up as treatment effect (≈ 9–10 points against a true 4). Standardize within grade × year first. Ask the room whether +10 points is plausible when a year of school is worth 5–6 points.
+**The live teaching moment (reframed):** estimating on raw points counts normal grade growth as program effect, so the raw estimates run well above the standardized ones: **+23 to +25 points in year 3, against +13 to +14 standardized.** Ask the room: "If a year of school is worth 5–6 points, which of these is measuring the program?" Standardize within grade × year first.
 
 ### Neighborhood: synthetic control (`3100_synth_demo.Rmd`)
 
-`tidysynth`, ACS panel 2014–2023, treatment from 2019, donors = St. Louis City and County ZIPs except 63101, 63103, and 63107 (43 donors). Predictors: pre-period means of the other two ACS measures plus the outcome in 2014, 2016, and 2018.
+`tidysynth`, ACS panel 2014–2023, treatment from 2019, donors = St. Louis City and County ZIPs except 63101, 63103, and 63107 (43 donors). Predictors: pre-period means of the other two ACS measures plus the outcome in 2014, 2016, and 2018. **No warnings.**
 
-| Outcome | Gap in 2023 | Planted | Rank | Fisher p |
-|---|---|---|---|---|
-| Population | +6,970 (+50.7%) | +50% | 1 of 44 | 0.023 |
-| Share Black | +0.190 | +0.175 | 1 of 44 | 0.023 |
-| Median income | −$13,850 (−19.4%) | −20% | 1 of 44 | 0.023 |
+| Outcome | 2019 | 2020 | 2021 | 2022 | 2023 | Rank | Fisher p |
+|---|---|---|---|---|---|---|---|
+| Population (gap, % of synthetic) | **−11.7%** | **−4.0%** | −0.1% | −0.6% | +0.5% | 2 of 44 | 0.045 |
+| Share Black (gap, proportion) | +0.005 | +0.004 | +0.016 | +0.021 | +0.015 | 6 of 44 | 0.136 |
+| Median income (gap, %) | −2.1% | −1.5% | +3.1% | **+8.9%** | **+12.9%** | 1 of 44 | 0.023 |
 
-0.023 = 1/44 is the smallest p-value possible with 44 units.
+Rank and Fisher p use the ratio of post- to pre-period fit (RMSPE); 0.023 = 1/44 is the smallest p possible with 44 units. Share Black stays inside the placebo cloud (no effect, as planted); the population dip and the income rise stand out.
 
 ## Things to expect in the live run
 
 - **Descriptive MAP trends are noisy before 2019.** Few cohort students were old enough to be tested in early years, and group membership changes each year. The chart is a picture, not an estimate; the event study is the pre-trend check.
-- **The ZIP-63106-only group's raw mean falls after 2019** because the new arrivals are lower-income. This is composition, not a negative effect.
+- **The ZIP-63106-only group's raw mean falls after 2019** because the students who move in are lower-income (student moves were not changed in the 2026-10-15 revision). This is composition, not a negative effect.
 - **Student-level ZIP aggregates are small** (median about 30 students per ZIP-year). That is why synthetic control uses the ACS panel rather than student averages.
+- **The aggregate ATT hides the shape.** The simple average (about 0.6 SD) blends a year-3 peak with a smaller lasting effect; read the event study.
 - **School-level synthetic control is not recommended:** donor schools lose the families who move into CNI schools, so they are not clean controls (a spillover worth discussing).

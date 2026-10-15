@@ -33,8 +33,13 @@ N_OTHER       <- 400    # out-of-area students (the cleaning step should drop th
 YEARS         <- 2012:2023
 POLICY_YR     <- 2019   # intervention starts
 CNI_ZIP       <- 63106  # treated neighborhood
-EFFECT_SCHOOL <- 4      # MAP points while enrolled in a CNI school, year >= 2019
-EFFECT_NEIGH  <- 1.5     # MAP points while living in ZIP 63106,  year >= 2019
+# MAP points by years since a student FIRST entered a CNI school (from 2019 on).
+# Absorbing: the effect follows the student even after leaving the CNI school.
+# (ELA's year-4+ value is planted higher because the CSDID repeated-cross-section fallback
+#  understates later years for ELA by roughly 2-3 points; see ground_truth.md.)
+EFFECT_PATH_ELA  <- c(5, 9, 13.5, 7.5)   # year 1, year 2, year 3, year 4 and later
+EFFECT_PATH_MATH <- c(5, 9, 13.5, 6)
+EFFECT_NEIGH  <- 0                  # no separate effect of living in ZIP 63106
 
 # ---- 2. Geography -----------------------------------------------------------
 zip_city   <- c(63101, 63102, 63103, 63104, 63106, 63107, 63108, 63109, 63110,
@@ -236,6 +241,20 @@ yr_math <- setNames(c(rnorm(9, 0, 0.8), -6, -3, -2), YEARS)
 yr_ela[as.character(2012:2020)]  <- round(yr_ela[as.character(2012:2020)], 2)
 yr_math[as.character(2012:2020)] <- round(yr_math[as.character(2012:2020)], 2)
 
+# First year each student is observed in a CNI school (2019 or later; 0 = never).
+# Computed in its own step with no random draws, so the random sequence below is unchanged.
+panel <- panel %>%
+  group_by(research_id) %>%
+  mutate(g_cni = {
+    yrs <- currentschoolyear[cni_sch & currentschoolyear >= POLICY_YR]
+    if (length(yrs) == 0) 0L else as.integer(min(yrs))
+  }) %>%
+  ungroup() %>%
+  mutate(e_cni = ifelse(g_cni > 0 & currentschoolyear >= g_cni, currentschoolyear - g_cni + 1, 0),
+         k_cni = pmin(e_cni, 4),
+         effect_ela  = ifelse(e_cni == 0, 0, EFFECT_PATH_ELA[pmax(k_cni, 1)]),
+         effect_math = ifelse(e_cni == 0, 0, EFFECT_PATH_MATH[pmax(k_cni, 1)]))
+
 panel <- panel %>%
   mutate(
     treat_sch   = cni_sch & currentschoolyear >= POLICY_YR,
@@ -243,10 +262,10 @@ panel <- panel %>%
     ability_m   = 0.8 * ability + rnorm(n(), 0, 0.6),
     ela  = round(190 + 5 * (grade - 3) + 10 * ability - 3 * frl - 6 * ell - 8 * iep +
                    yr_ela[as.character(currentschoolyear)] +
-                   EFFECT_SCHOOL * treat_sch + EFFECT_NEIGH * treat_neigh + rnorm(n(), 0, 5)),
+                   effect_ela + EFFECT_NEIGH * treat_neigh + rnorm(n(), 0, 5)),
     math = round(192 + 6 * (grade - 3) + 10 * ability_m - 3 * frl - 4 * ell - 8 * iep +
                    yr_math[as.character(currentschoolyear)] +
-                   EFFECT_SCHOOL * treat_sch + EFFECT_NEIGH * treat_neigh + rnorm(n(), 0, 5)),
+                   effect_math + EFFECT_NEIGH * treat_neigh + rnorm(n(), 0, 5)),
     covid_att = case_when(currentschoolyear == 2021 ~ -0.6,
                           currentschoolyear == 2022 ~ -0.5,
                           currentschoolyear == 2023 ~ -0.3, TRUE ~ 0),
@@ -416,7 +435,10 @@ write_raw(school_demo, "dese_school_demo.csv")
 # ---- 10. Mock ACS ZIP panel (stands in for a tidycensus pull) -------------
 # Generated directly at the ZIP level, so its precision does not depend on the
 # number of simulated students. Baseline levels follow each ZIP's simulated
-# student composition; the CNI neighborhood changes from 2019 on.
+# student composition. The CNI neighborhood (63106), relative to its trend:
+#   population   -12% in 2019, -4% in 2020 (rebounding), back to normal from 2021;
+#   share Black  no change;
+#   median income unchanged in 2019-2020, then +6% (2021), +9% (2022), +12% (2023).
 ACS_YEARS <- 2014:2023
 acs_base <- panel %>%
   filter(zip %in% c(zip_city, zip_county), currentschoolyear < POLICY_YR) %>%
@@ -433,11 +455,13 @@ acs <- acs_base %>%
   crossing(year = ACS_YEARS) %>%
   mutate(
     t_post = pmax(0, year - (POLICY_YR - 1)) * (zip == CNI_ZIP),   # 0 before 2019; 1, 2, ... after
-    pop_total     = round(pop0 * (1 + 0.004 * (year - 2014)) * (1 + 0.10 * t_post) *
+    pop_mult      = case_when(t_post == 1 ~ 0.88, t_post == 2 ~ 0.96, TRUE ~ 1),
+    inc_mult      = case_when(t_post == 3 ~ 1.06, t_post == 4 ~ 1.09, t_post >= 5 ~ 1.12, TRUE ~ 1),
+    pop_total     = round(pop0 * (1 + 0.004 * (year - 2014)) * pop_mult *
                             (1 + rnorm(n(), 0, 0.01))),
     pct_black     = round(pmin(0.99, base_black + trend_black * (year - 2014) +
-                                 0.035 * t_post + rnorm(n(), 0, 0.006)), 3),
-    median_income = round(inc0 * 1.025^(year - 2014) * (1 - 0.04 * t_post) *
+                                 rnorm(n(), 0, 0.006)), 3),
+    median_income = round(inc0 * 1.025^(year - 2014) * inc_mult *
                             (1 + rnorm(n(), 0, 0.015)))
   ) %>%
   select(zip, year, median_income, pct_black, pop_total)
@@ -449,5 +473,6 @@ cat("Core rows:", nrow(core), "| students:", n_distinct(core$research_id),
     "| enroll:", nrow(enroll), "| discipline:", nrow(disc),
     "| test:", nrow(test), "| schools:", nrow(building_list), "\n")
 cat("CNI schools (dist-sch):", with(schools[schools$cni == 1, ], paste(dist, sch, sep = "-")), "\n")
-cat("Planted effects (MAP points, year >= ", POLICY_YR, "): CNI school +",
-    EFFECT_SCHOOL, ", ZIP ", CNI_ZIP, " +", EFFECT_NEIGH, "\n", sep = "")
+cat("Planted effects (MAP points by years since first CNI-school entry, 1/2/3/4+): ELA ",
+    paste(EFFECT_PATH_ELA, collapse = " / "), "; Math ", paste(EFFECT_PATH_MATH, collapse = " / "),
+    "; ZIP ", CNI_ZIP, " +", EFFECT_NEIGH, "\n", sep = "")
