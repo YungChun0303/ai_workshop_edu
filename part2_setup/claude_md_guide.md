@@ -35,7 +35,7 @@ For this workshop you need the first two: **one user file for you, one project f
 
 ### A user-level example: the Task Clarification Protocol
 
-This is the user-level `CLAUDE.md` of the workshop's instructor. It is short and it does one job well: it makes Claude ask before it guesses.
+This is the user-level `CLAUDE.md` of the workshop's instructor (also available as [`project_template/claude_global.md`](project_template/claude_global.md); copy it to `~/.claude/CLAUDE.md` to use it). It is short and it does one job well: it makes Claude ask before it guesses.
 
 ```markdown
 # Global Rules

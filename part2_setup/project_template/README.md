@@ -9,6 +9,7 @@ A starter folder for reproducible R research projects that work well with Claude
 3. **Fill in `CLAUDE.md`** — replace every `[bracketed placeholder]`. This is the most important step.
 4. **Put your original data files in `data_raw/`** and never edit them again.
 5. **Start Claude Code** in the project folder (`cd` into it, then run `claude`).
+6. **Optional: a user-level `CLAUDE.md`.** `claude_global.md` is the workshop instructor's personal file (the Task Clarification Protocol from Part 2). Claude does **not** load it from inside a project. To use it for every project, copy it to `~/.claude/CLAUDE.md` (Windows: `%USERPROFILE%\.claude\CLAUDE.md`), then delete it from your project folder.
 
 ## Folder Layout
 
