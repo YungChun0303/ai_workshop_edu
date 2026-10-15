@@ -71,7 +71,7 @@ By the end of this session, participants will be able to:
 **Goals.** Leave with a working installation and a project folder an agent can navigate.
 
 **Topics.**
-- Installing Claude CLI on macOS and Windows with the native installer; verifying the install; connecting Claude to a live R session with Posit's `mcptools`.
+- Installing Claude CLI on macOS and Windows with the native installer; verifying the install; what MCP is (the open standard for connecting AI agents to other software) and connecting Claude to a live R session with Posit's `mcptools`.
 - **Project folder structure:** immutable `data_raw/`, generated `data_clean/`, a 4-digit `code/` hierarchy (`0000` import, `1000` cleaning, `2000` descriptives, `3000+` models), and separate `outputs/` for figures and tables.
 - **Why `CLAUDE.md` matters.** It is the project's memory: conventions, data rules, and analysis standards the agent reads at the start of every session. A good `CLAUDE.md` is the difference between an agent that guesses and one that follows your lab's rules.
 
