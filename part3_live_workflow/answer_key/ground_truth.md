@@ -55,6 +55,8 @@ The effect depends on **years since a student first entered a CNI school** (2019
 
 Why year 4+ is planted higher for ELA: with an unbalanced student panel, `att_gt()` falls back to comparing repeated cross-sections, and in years 4–5 only the 2019 and 2020 entry cohorts remain, so which of their students are in tested grades shifts as they age. That composition shift pulls the late ELA estimates down by about 3 points (Math by about 1). The planted values were tuned so the event study **shows** about +4–6 points from year 4 on in both subjects. In SD units (within grade × year SD ≈ 12), the peak is about 1.1 SD.
 
+**Not a realistic effect size.** The year-3 peak (about 1.1 SD) is deliberately exaggerated so the effect is easy to see in a small synthetic sample. Real education interventions are much smaller: Kraft (2020, *Educational Researcher* 49(4), 241–253) treats effects under 0.05 SD as small, 0.05–0.20 SD as medium, and 0.20 SD or more as large. In real data, an estimate above 1 SD should prompt an error check before interpretation.
+
 Attendance and discipline have **no** planted effect.
 
 ### Neighborhood (ACS ZIP panel)
